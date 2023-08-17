@@ -1,0 +1,31 @@
+{
+  "name": "grpc-currency-service",
+  "version": "0.1.0",
+  "description": "A gRPC currency conversion microservice",
+  "repository": "https://github.com/GoogleCloudPlatform/microservices-demo",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "semistandard *.js"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@opentelemetry/api": "^1.0.2",
+    "@opentelemetry/exporter-collector-grpc": "0.25.0",
+    "@opentelemetry/instrumentation": "0.25.0",
+    "@opentelemetry/instrumentation-grpc": "0.25.0",
+    "@opentelemetry/resources": "0.25.0",
+    "@opentelemetry/semantic-conventions": "0.25.0",
+    "@opentelemetry/sdk-trace-node": "0.25.0",
+    "@opentelemetry/sdk-trace-base": "0.25.0",
+    "@grpc/proto-loader": "0.5.6",
+    "async": "3.2.0",
+    "google-protobuf": "3.13.0",
+    "grpc": "1.24.10",
+    "pino": "5.17.0",
+    "request": "2.88.2",
+    "xml2js": "0.4.23"
+  },
+  "devDependencies": {
+    "semistandard": "12.0.1"
+  }
+}

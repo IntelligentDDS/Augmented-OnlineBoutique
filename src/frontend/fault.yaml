@@ -1,0 +1,23 @@
+service: frontend
+faults: 
+  - fault: FrontProductHandlerReturn
+    type: return
+    location: main/FrontProductHandlerReturn
+  - fault: FrontChooseAdWrite
+    type: write
+    location: main/FrontChooseAdWrite
+  - fault: FrontSetCurrencyHandlerRead
+    type: read
+    location: main/FrontSetCurrencyHandlerRead
+  - fault: FrontSetCurrencyHandlerLatency
+    type: latency
+    location: main/FrontSetCurrencyHandlerLatency
+  - fault: FrontSetCurrencyHandlerMemory
+    type: memory
+    location: main/FrontSetCurrencyHandlerMemory
+  - fault: FrontPlaceOrderHandlerException
+    type: exception
+    location: main/FrontPlaceOrderHandlerException
+  - fault: FrontChooseAdCPU
+    type: cpu
+    location: main/FrontChooseAdCPU

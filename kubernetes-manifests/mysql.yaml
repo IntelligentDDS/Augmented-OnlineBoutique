@@ -1,0 +1,45 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: hipster
+spec:
+  ports:
+  - port: 3306
+  selector:
+    app: mysql
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: hipster
+spec:
+  selector:
+    matchLabels:
+      app: mysql
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      restartPolicy: Always
+      hostname: mysql
+      containers:
+      - name: mysql-ct
+        image: registry.cn-shenzhen.aliyuncs.com/trainticket/hipster-mysql:v2 #mysql:8
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - mountPath: "/var/lib/mysql"
+          name: volume
+        env:
+        - name: "MYSQL_ROOT_PASSWORD"
+          value: "root123"
+      volumes:
+      - name: volume
+        hostPath:
+          path: /data/mysql/

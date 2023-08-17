@@ -1,0 +1,23 @@
+service: checkout
+faults: 
+  - fault: CheckoutPlaceOrderCPU
+    type: cpu
+    location: main/CheckoutPlaceOrderCPU
+  - fault: CheckoutPlaceOrderLatency
+    type: latency
+    location: main/CheckoutPlaceOrderLatency
+  - fault: CheckoutPlaceOrderRead
+    type: read
+    location: main/CheckoutPlaceOrderRead
+  - fault: CheckoutPlaceOrderMemory
+    type: memory
+    location: main/CheckoutPlaceOrderMemory
+  - fault: CheckoutPlaceOrderWrite
+    type: write
+    location: main/CheckoutPlaceOrderWrite
+  - fault: CheckoutChargeCardException
+    type: exception
+    location: main/CheckoutChargeCardException
+  - fault: CheckoutChargeCardReturn
+    type: return
+    location: main/CheckoutChargeCardReturn

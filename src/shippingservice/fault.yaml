@@ -1,0 +1,20 @@
+service: shipping
+faults: 
+  - fault: ShippingGetQuoteLatency
+    type: latency
+    location: main/ShippingGetQuoteLatency
+  - fault: ShippingShipOrderMemory
+    type: memory
+    location: main/ShippingShipOrderMemory
+  - fault: CheckoutquoteShippingLatency
+    type: latency
+    location: main/CheckoutquoteShippingLatency
+  - fault: ShippingCreateQuoteFromCountRead
+    type: read
+    location: main/ShippingCreateQuoteFromCountRead
+  - fault: ShippingCreateQuoteFromFloatWrite
+    type: write
+    location: main/ShippingCreateQuoteFromFloatWrite
+  - fault: ShippingQuoteByCountFloatCPU
+    type: cpu
+    location: main/ShippingQuoteByCountFloatCPU

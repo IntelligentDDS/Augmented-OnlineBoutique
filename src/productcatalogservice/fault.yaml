@@ -1,0 +1,29 @@
+service: product
+faults: 
+  - fault: ProductReadCatalogMemory
+    type: memory
+    location: main/ProductReadCatalogMemory
+  - fault: ProductReadCatalogLatency
+    type: latency
+    location: main/ProductReadCatalogLatency
+  - fault: ProductGetProductReturn
+    type: return
+    location: main/ProductGetProductReturn
+  - fault: ProductListProductsLatency
+    type: latency
+    location: main/ProductListProductsLatency
+  - fault: ProductListProductsRead
+    type: read
+    location: main/ProductListProductsRead
+  - fault: ProductListProductsWrite
+    type: write
+    location: main/ProductListProductsWrite
+  - fault: ProductListProductsCPU
+    type: cpu
+    location: main/ProductListProductsCPU
+  - fault: ProductGetProductException
+    type: expection
+    location: main/ProductGetProductException
+  - fault: ProductGetProductLatency
+    type: latency
+    location: main/ProductGetProductLatency

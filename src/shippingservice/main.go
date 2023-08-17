@@ -1,0 +1,345 @@
+// Copyright 2018 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"fmt"
+	"math"
+	"math/rand"
+	"net"
+	"os"
+	"time"
+
+	"github.com/pingcap/failpoint"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
+
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+
+	// "go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/trace"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+
+	pb "github.com/GoogleCloudPlatform/microservices-demo/src/shippingservice/genproto"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+)
+
+const (
+	defaultPort = "50051"
+)
+
+var log *logrus.Logger
+
+// seeded determines if the random number generator is ready.
+var seeded bool = false
+
+// Quote represents a currency value.
+type Quote struct {
+	Dollars uint32
+	Cents   uint32
+}
+
+var (
+	// Add attribute of pod name and node name
+	tracer   = otel.Tracer("shipping-tracer")
+	podName  = os.Getenv("POD_NAME")
+	nodeName = os.Getenv("NODE_NAME")
+
+	// labels represent additional key-value descriptors that can be bound to a
+	// metric observer or recorder.
+	// commonLabels = []attribute.KeyValue{
+	// 	attribute.String("PodName", podName),
+	// 	attribute.String("NodeName", nodeName)}
+)
+
+// Initializes an OTLP exporter, and configures the corresponding trace and providers.
+func initProvider() func() {
+	endpoint := os.Getenv("COLLECTOR_ADDR")
+	serviceName := os.Getenv("SERVICE_NAME")
+
+	ctx := context.Background()
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			// the service name used to display traces in backends
+			semconv.ServiceNameKey.String(serviceName),
+			attribute.String("PodName", podName),
+			attribute.String("NodeName", nodeName),
+		),
+	)
+
+	if err != nil {
+		log.Fatalf("Failed to create resource: %v", err)
+
+	}
+
+	// Set up a trace exporter
+	traceExporter, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithInsecure(),
+		otlptracegrpc.WithEndpoint(endpoint),
+		otlptracegrpc.WithDialOption(grpc.WithBlock()),
+	)
+
+	if err != nil {
+		log.Fatalf("Failed to create trace exporter: %v", err)
+	}
+
+	// Register the trace exporter with a TracerProvider, using a batch
+	// span processor to aggregate spans before export.
+	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
+	tracerProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithResource(res),
+		sdktrace.WithSpanProcessor(bsp),
+	)
+	otel.SetTracerProvider(tracerProvider)
+
+	// set global propagator to tracecontext (the default is no-op).
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+
+	return func() {
+		// Shutdown will flush any remaining spans and shut down the exporter.
+		if tracerProvider.Shutdown(ctx) != nil {
+			log.Fatalf("Failed to shutdown TracerProvider: %v", tracerProvider.Shutdown(ctx))
+		}
+	}
+}
+
+func main() {
+	log = logrus.New()
+	log.Level = logrus.DebugLevel
+	log.Formatter = &logrus.JSONFormatter{
+		FieldMap: logrus.FieldMap{
+			logrus.FieldKeyTime:  "timestamp",
+			logrus.FieldKeyLevel: "severity",
+			logrus.FieldKeyMsg:   "message",
+		},
+		TimestampFormat: time.RFC3339Nano,
+	}
+	log.Out = os.Stdout
+
+	shutdown := initProvider()
+	defer shutdown()
+
+	tracer = otel.Tracer("shipping-tracer")
+
+	port := defaultPort
+	if value, ok := os.LookupEnv("PORT"); ok {
+		port = value
+	}
+	port = fmt.Sprintf(":%s", port)
+
+	lis, err := net.Listen("tcp", port)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+
+	var srv *grpc.Server
+	srv = grpc.NewServer(
+		grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor()),
+		grpc.StreamInterceptor(otelgrpc.StreamServerInterceptor()),
+	)
+
+	svc := &server{}
+	pb.RegisterShippingServiceServer(srv, svc)
+	healthpb.RegisterHealthServer(srv, svc)
+	log.Infof("Shipping Service listening on port %s", port)
+
+	// Register reflection service on gRPC server.
+	reflection.Register(srv)
+	if err := srv.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
+}
+
+// server controls RPC service responses.
+type server struct{}
+
+// Check is for health checking.
+func (s *server) Check(ctx context.Context, req *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
+	return &healthpb.HealthCheckResponse{Status: healthpb.HealthCheckResponse_SERVING}, nil
+}
+
+func (s *server) Watch(req *healthpb.HealthCheckRequest, ws healthpb.Health_WatchServer) error {
+	return status.Errorf(codes.Unimplemented, "health check via Watch not implemented")
+}
+
+// GetQuote produces a shipping quote (cost) in USD.
+func (s *server) GetQuote(ctx context.Context, in *pb.GetQuoteRequest) (*pb.GetQuoteResponse, error) {
+	getQuoteSpan := trace.SpanFromContext(ctx)
+	// getQuoteSpan.SetAttributes(commonLabels...)
+	traceId := getQuoteSpan.SpanContext().TraceID()
+	spanId := getQuoteSpan.SpanContext().SpanID()
+
+	log.Infof("TraceID: %v SpanID: %v GetQuote received request", traceId, spanId)
+	defer log.Infof("TraceID: %v SpanID: %v GetQuote completed request", traceId, spanId)
+
+	// 1. Our quote system requires the total number of items to be shipped.
+	count := 0
+	for _, item := range in.Items {
+		count += int(item.Quantity)
+	}
+
+	/*
+		long query, latency
+	*/
+	if val, _err_ := failpoint.Eval(_curpkg_("ShippingGetQuoteLatency")); _err_ == nil {
+		// log.Info("Inject ProductReadCatalogLatency Success")
+		time.Sleep(time.Millisecond * time.Duration(val.(int)))
+	}
+
+	// 2. Generate a quote based on the total number of items to be shipped.
+	quote := CreateQuoteFromCount(ctx, count)
+
+	// 3. Generate a response.
+	return &pb.GetQuoteResponse{
+		CostUsd: &pb.Money{
+			CurrencyCode: "USD",
+			Units:        int64(quote.Dollars),
+			Nanos:        int32(quote.Cents * 10000000)},
+	}, nil
+
+}
+
+// ShipOrder mocks that the requested items will be shipped.
+// It supplies a tracking ID for notional lookup of shipment delivery status.
+func (s *server) ShipOrder(ctx context.Context, in *pb.ShipOrderRequest) (*pb.ShipOrderResponse, error) {
+	shipOrderSpan := trace.SpanFromContext(ctx)
+	// shipOrderSpan.SetAttributes(commonLabels...)
+	traceId := shipOrderSpan.SpanContext().TraceID()
+	spanId := shipOrderSpan.SpanContext().SpanID()
+
+	log.Infof("TraceID: %v SpanID: %v ShipOrder received request", traceId, spanId)
+	defer log.Infof("TraceID: %v SpanID: %v ShipOrder completed request", traceId, spanId)
+
+	// 1. Create a Tracking ID
+	baseAddress := fmt.Sprintf("%s, %s, %s", in.Address.StreetAddress, in.Address.City, in.Address.State)
+	id := CreateTrackingId(ctx, baseAddress)
+
+	// 2. Generate a response.
+	return &pb.ShipOrderResponse{
+		TrackingId: id,
+	}, nil
+}
+
+// CreateTrackingId generates a tracking ID.
+func CreateTrackingId(ctx context.Context, salt string) string {
+	if !seeded {
+		rand.Seed(time.Now().UnixNano())
+		seeded = true
+	}
+
+	return fmt.Sprintf("%c%c-%d%s-%d%s",
+		getRandomLetterCode(),
+		getRandomLetterCode(),
+		len(salt),
+		getRandomNumber(3),
+		len(salt)/2,
+		getRandomNumber(7),
+	)
+}
+
+// getRandomLetterCode generates a code point value for a capital letter.
+func getRandomLetterCode() uint32 {
+	return 65 + uint32(rand.Intn(25))
+}
+
+// getRandomNumber generates a string representation of a number with the requested number of digits.
+func getRandomNumber(digits int) string {
+	str := ""
+	for i := 0; i < digits; i++ {
+		str = fmt.Sprintf("%s%d", str, rand.Intn(10))
+	}
+
+	return str
+}
+
+// String representation of the Quote.
+func (q Quote) String() string {
+	return fmt.Sprintf("$%d.%d", q.Dollars, q.Cents)
+}
+
+// CreateQuoteFromCount takes a number of items and returns a Price struct.
+func CreateQuoteFromCount(ctx context.Context, count int) Quote {
+	ctx, createQuoteFromCountSpan := tracer.Start(ctx, "hipstershop.ShippingService/CreateQuoteFromCount")
+	defer createQuoteFromCountSpan.End()
+
+	traceId := createQuoteFromCountSpan.SpanContext().TraceID()
+	spanId := createQuoteFromCountSpan.SpanContext().SpanID()
+
+	log.Infof("TraceID: %v SpanID: %v CreateQuoteFromCount received request", traceId, spanId)
+	defer log.Infof("TraceID: %v SpanID: %v CreateQuoteFromCount completed request", traceId, spanId)
+	return CreateQuoteFromFloat(ctx, quoteByCountFloat(ctx, count))
+}
+
+// CreateQuoteFromFloat takes a price represented as a float and creates a Price struct.
+func CreateQuoteFromFloat(ctx context.Context, value float64) Quote {
+	ctx, createQuoteFromFloatSpan := tracer.Start(ctx, "hipstershop.ShippingService/CreateQuoteFromFloat")
+	defer createQuoteFromFloatSpan.End()
+
+	traceId := createQuoteFromFloatSpan.SpanContext().TraceID()
+	spanId := createQuoteFromFloatSpan.SpanContext().SpanID()
+
+	log.Infof("TraceID: %v SpanID: %v CreateQuoteFromFloat received request", traceId, spanId)
+	defer log.Infof("TraceID: %v SpanID: %v CreateQuoteFromFloat completed request", traceId, spanId)
+
+	units, fraction := math.Modf(value)
+
+	return Quote{
+		uint32(units),
+		uint32(math.Trunc(fraction * 100)),
+	}
+}
+
+// quoteByCountFloat takes a number of items and generates a price quote represented as a float.
+func quoteByCountFloat(ctx context.Context, count int) float64 {
+	ctx, quoteByCountFloatSpan := tracer.Start(ctx, "hipstershop.ShippingService/QuoteByCountFloat")
+	defer quoteByCountFloatSpan.End()
+
+	traceId := quoteByCountFloatSpan.SpanContext().TraceID()
+	spanId := quoteByCountFloatSpan.SpanContext().SpanID()
+
+	log.Infof("TraceID: %v SpanID: %v QuoteByCountFloat received request", traceId, spanId)
+	defer log.Infof("TraceID: %v SpanID: %v QuoteByCountFloat completed request", traceId, spanId)
+	if count == 0 {
+		return 0
+	}
+	count64 := float64(count)
+	var p = 1 + (count64 * 0.2)
+	/*
+	  Inject cpu consume fault, trigger by ShippingQuoteByCountFloatCPU flag
+	*/
+	if _, _err_ := failpoint.Eval(_curpkg_("ShippingQuoteByCountFloatCPU")); _err_ == nil {
+		start := time.Now()
+		for {
+			// break for after duration
+			if time.Now().Sub(start).Milliseconds() > 800 {
+				break
+			}
+		}
+	}
+	return count64 + math.Pow(3, p)
+}

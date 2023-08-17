@@ -1,0 +1,60 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: hipster
+spec:
+  type: NodePort
+  ports:
+  - port: 3306
+    targetPort: 3306
+    name: mysql
+  - port: 9104
+    targetPort: 9104
+    nodePort: 33334
+    name: mysqld-exporter
+  selector:
+    app: mysql
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: hipster
+spec:
+  selector:
+    matchLabels:
+      app: mysql
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      restartPolicy: Always
+      hostname: mysql
+      containers:
+      - name: mysql-ct
+        image: registry.cn-shenzhen.aliyuncs.com/trainticket/hipster-mysql:v2 #mysql:8
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - mountPath: "/var/lib/mysql"
+          name: volume
+        env:
+        - name: "MYSQL_ROOT_PASSWORD"
+          value: "root123"
+      - name: mysqld-exporter
+        env:
+        - name: DATA_SOURCE_NAME
+          value: "root:root123@(127.0.0.1:3306)/"
+        image: prom/mysqld-exporter:v0.13.0
+        ports:
+        - containerPort: 9104
+          protocol: TCP
+      volumes:
+      - name: volume
+        hostPath:
+          path: /data/mysql/

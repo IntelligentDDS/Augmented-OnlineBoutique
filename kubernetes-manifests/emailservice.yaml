@@ -1,0 +1,78 @@
+# Copyright 2018 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: emailservice
+  namespace: hipster
+spec:
+  selector:
+    matchLabels:
+      app: emailservice
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/extraStatTags: client_pod
+      labels:
+        app: emailservice
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+      - name: server
+        image: registry.cn-shenzhen.aliyuncs.com/trainticket/hipster-emailservice:opentelemetry1.0
+        imagePullPolicy: Always
+        securityContext:
+          capabilities:
+            add:
+            - SYS_PTRACE        
+        ports:
+        - containerPort: 8080
+        env:
+        - name: PORT
+          value: "8080"
+        - name: COLLECTOR_ADDR
+          value: "otel-collector.observability:4317"
+        - name: SERVICE_NAME
+          value: "Emailservice"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 200m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emailservice
+  namespace: hipster
+spec:
+  type: ClusterIP
+  selector:
+    app: emailservice
+  ports:
+  - name: grpc
+    port: 5000
+    targetPort: 8080

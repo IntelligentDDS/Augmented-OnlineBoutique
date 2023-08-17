@@ -1,0 +1,81 @@
+# Copyright 2018 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adservice
+  namespace: hipster
+spec:
+  selector:
+    matchLabels:
+      app: adservice
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/extraStatTags: client_pod
+      labels:
+        app: adservice
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+      - name: server
+        image: registry.cn-shenzhen.aliyuncs.com/trainticket/hipster-adservice:mysql
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 9555
+        env:
+        - name: PORT
+          value: "9555"
+        - name: MYSQL_ADDR
+          value: "mysql:3306"
+        - name: "SQL_USER"
+          value: "root"
+        - name: "SQL_PASSWORD"
+          value: "root123"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector.observability:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "AdService"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            cpu: 200m
+            memory: 180Mi
+          limits:
+            cpu: 300m
+            memory: 300Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: adservice
+  namespace: hipster
+spec:
+  type: ClusterIP
+  selector:
+    app: adservice
+  ports:
+  - name: grpc
+    port: 9555
+    targetPort: 9555
